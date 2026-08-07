@@ -377,7 +377,7 @@ class ChallengePeriodManager(CacheController):
                 demotions.append(hotkey)
                 continue
 
-            returns_threshold = ValiConfig.SUBACCOUNT_CHALLENGE_RETURNS_THRESHOLD[asset_class]
+            returns_threshold = self._returns_threshold(state, asset_class)
             if hotkey == "5EPeU7Y8bqokEVf31ZWPZkP3F7Kv1v3ALuhnpp5T5Fvfjp85_87": # remove once eliminated or promoted
                 returns_threshold = 0.08
             if self._check_promotion(state, returns_threshold, current_time_ms):
@@ -402,6 +402,12 @@ class ChallengePeriodManager(CacheController):
         return self._to_slack_message(promotions)
 
     # ==================== Evaluation Methods ====================
+
+    @staticmethod
+    def _returns_threshold(state: MinerBucketState, asset_class: MinerAssetClass) -> float:
+        if state.current_bucket.is_pro:
+            return ValiConfig.PRO_CHALLENGE_RETURNS_THRESHOLD[asset_class]
+        return ValiConfig.SUBACCOUNT_CHALLENGE_RETURNS_THRESHOLD[asset_class]
 
     @staticmethod
     def _check_time(state: MinerBucketState, current_time_ms: int) -> EliminationReason | None:
@@ -429,7 +435,11 @@ class ChallengePeriodManager(CacheController):
     def _check_intraday_drawdown(state: MinerBucketState) -> EliminationReason | None:
         if state.drawdown.intraday_drawdown_pct > state.intraday_drawdown_threshold_pct:
             logger.warning(f"[CHALLENGE] ELIMINATION intraday drawdown {state.intraday_drawdown_threshold_pct}%: {state}")
-            if state.current_bucket in (MinerBucket.CHALLENGE, MinerBucket.SUBACCOUNT_CHALLENGE):
+            if state.current_bucket == MinerBucket.SUBACCOUNT_PRO_CHALLENGE:
+                return EliminationReason.FAILED_PRO_CHALLENGE_PERIOD_INTRADAY_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_PRO_FUNDED:
+                return EliminationReason.FAILED_PRO_FUNDED_PERIOD_INTRADAY_DRAWDOWN
+            elif state.current_bucket in (MinerBucket.CHALLENGE, MinerBucket.SUBACCOUNT_CHALLENGE):
                 return EliminationReason.FAILED_CHALLENGE_PERIOD_INTRADAY_DRAWDOWN
             else:
                 return EliminationReason.FAILED_FUNDED_PERIOD_INTRADAY_DRAWDOWN
@@ -441,7 +451,11 @@ class ChallengePeriodManager(CacheController):
     def _check_eod_drawdown(state: MinerBucketState) -> EliminationReason | None:
         if state.drawdown.eod_drawdown_pct > state.eod_drawdown_threshold_pct:
             logger.warning(f"[CHALLENGE] ELIMINATION EOD drawdown {state.eod_drawdown_threshold_pct}%: {state}")
-            if state.current_bucket in (MinerBucket.CHALLENGE, MinerBucket.SUBACCOUNT_CHALLENGE):
+            if state.current_bucket == MinerBucket.SUBACCOUNT_PRO_CHALLENGE:
+                return EliminationReason.FAILED_PRO_CHALLENGE_PERIOD_EOD_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_PRO_FUNDED:
+                return EliminationReason.FAILED_PRO_FUNDED_PERIOD_EOD_DRAWDOWN
+            elif state.current_bucket in (MinerBucket.CHALLENGE, MinerBucket.SUBACCOUNT_CHALLENGE):
                 return EliminationReason.FAILED_CHALLENGE_PERIOD_EOD_DRAWDOWN
             else:
                 return EliminationReason.FAILED_FUNDED_PERIOD_EOD_DRAWDOWN
@@ -453,10 +467,16 @@ class ChallengePeriodManager(CacheController):
 
     @staticmethod
     def _check_static_drawdown(state: MinerBucketState) -> EliminationReason | None:
-        threshold_pct = ValiConfig.SUBACCOUNT_STATIC_DRAWDOWN_THRESHOLD * 100
+        is_pro = state.current_bucket.is_pro
+        threshold_pct = (ValiConfig.PRO_STATIC_DRAWDOWN_THRESHOLD if is_pro
+                         else ValiConfig.SUBACCOUNT_STATIC_DRAWDOWN_THRESHOLD) * 100
         if state.drawdown.static_drawdown_pct > threshold_pct:
             logger.warning(f"[CHALLENGE] ELIMINATION static drawdown {threshold_pct}%: {state}")
-            if state.current_bucket == MinerBucket.SUBACCOUNT_CHALLENGE:
+            if state.current_bucket == MinerBucket.SUBACCOUNT_PRO_CHALLENGE:
+                return EliminationReason.FAILED_PRO_CHALLENGE_PERIOD_STATIC_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_PRO_FUNDED:
+                return EliminationReason.FAILED_PRO_FUNDED_PERIOD_STATIC_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_CHALLENGE:
                 return EliminationReason.FAILED_CHALLENGE_PERIOD_STATIC_DRAWDOWN
             else:
                 return EliminationReason.FAILED_FUNDED_PERIOD_STATIC_DRAWDOWN
@@ -466,10 +486,16 @@ class ChallengePeriodManager(CacheController):
 
     @staticmethod
     def _check_static_eod_drawdown(state: MinerBucketState) -> EliminationReason | None:
-        threshold_pct = ValiConfig.SUBACCOUNT_STATIC_EOD_DRAWDOWN_THRESHOLD * 100
+        is_pro = state.current_bucket.is_pro
+        threshold_pct = (ValiConfig.PRO_STATIC_EOD_DRAWDOWN_THRESHOLD if is_pro
+                         else ValiConfig.SUBACCOUNT_STATIC_EOD_DRAWDOWN_THRESHOLD) * 100
         if state.drawdown.static_eod_drawdown_pct > threshold_pct:
             logger.warning(f"[CHALLENGE] ELIMINATION static EOD drawdown {threshold_pct}%: {state}")
-            if state.current_bucket == MinerBucket.SUBACCOUNT_CHALLENGE:
+            if state.current_bucket == MinerBucket.SUBACCOUNT_PRO_CHALLENGE:
+                return EliminationReason.FAILED_PRO_CHALLENGE_PERIOD_STATIC_EOD_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_PRO_FUNDED:
+                return EliminationReason.FAILED_PRO_FUNDED_PERIOD_STATIC_EOD_DRAWDOWN
+            elif state.current_bucket == MinerBucket.SUBACCOUNT_CHALLENGE:
                 return EliminationReason.FAILED_CHALLENGE_PERIOD_STATIC_EOD_DRAWDOWN
             else:
                 return EliminationReason.FAILED_FUNDED_PERIOD_STATIC_EOD_DRAWDOWN
@@ -586,7 +612,7 @@ class ChallengePeriodManager(CacheController):
 
             logger.info(f"[CHALLENGE] promoting to {target_bucket.value}: {state}")
 
-            if target_bucket == MinerBucket.SUBACCOUNT_FUNDED:
+            if target_bucket.is_subaccount_funded:
                 # Close all existing positions
                 self._position_client.close_all_positions(
                     hotkey=hotkey,
@@ -820,7 +846,8 @@ class ChallengePeriodManager(CacheController):
         for hotkey, state in self.miner_states.items():
             if hotkey not in hotkeys:
                 bucket = state.current_bucket
-                if bucket in [MinerBucket.ENTITY, MinerBucket.SUBACCOUNT_CHALLENGE, MinerBucket.SUBACCOUNT_FUNDED, MinerBucket.ELIMINATED]:
+                # Synthetic hotkeys are never in the metagraph, so no subaccount bucket is prunable
+                if bucket in [MinerBucket.ENTITY, MinerBucket.ELIMINATED] or bucket.is_subaccount:
                     continue
                 hotkeys_prune.append(hotkey)
                 logger.warning(f"[CHALLENGE] {hotkey} pruned from {bucket.value}: no longer in metagraph")
@@ -1019,12 +1046,15 @@ class ChallengePeriodManager(CacheController):
         intraday_threshold = state.intraday_drawdown_threshold
         eod_threshold = state.eod_drawdown_threshold
         criteria = state.drawdown_criteria
+        is_pro = state.current_bucket.is_pro
         return {
             **state.drawdown.to_dict(),
             "intraday_drawdown_threshold": intraday_threshold,
             "eod_drawdown_threshold": eod_threshold,
-            "static_drawdown_threshold": ValiConfig.SUBACCOUNT_STATIC_DRAWDOWN_THRESHOLD,
-            "static_eod_drawdown_threshold": ValiConfig.SUBACCOUNT_STATIC_EOD_DRAWDOWN_THRESHOLD,
+            "static_drawdown_threshold": (ValiConfig.PRO_STATIC_DRAWDOWN_THRESHOLD if is_pro
+                                          else ValiConfig.SUBACCOUNT_STATIC_DRAWDOWN_THRESHOLD),
+            "static_eod_drawdown_threshold": (ValiConfig.PRO_STATIC_EOD_DRAWDOWN_THRESHOLD if is_pro
+                                              else ValiConfig.SUBACCOUNT_STATIC_EOD_DRAWDOWN_THRESHOLD),
             "drawdown_criteria": criteria.value,
         }
 
