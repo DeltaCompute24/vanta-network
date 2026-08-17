@@ -1115,14 +1115,24 @@ class EntityManager(ValidatorBroadcastBase):
             if not orders:
                 return EMPTY_RESPONSE
 
+            # Weekly-scope penalties
+            week_penalties = {}
+            for cp in (debt_ledger.checkpoints if debt_ledger else []):
+                cp_week_start = TimeUtil.ms_at_start_of_week(cp.timestamp_ms - 1)
+                week_penalties[cp_week_start] = min(
+                    week_penalties.get(cp_week_start, 1.0), cp.weekly_penalty
+                )
+
             weekly_settlements = []
             def _record_week(start_ms, end_ms, balance, prev_hwm, eow_unrealized, week_orders):
+                week_penalty = week_penalties.get(start_ms, 1.0)
                 weekly_settlements.append({
                     'start_ms': start_ms,
                     'end_ms': end_ms,
                     'eow_balance': balance,
                     'eow_unrealized': eow_unrealized,
-                    'payout': max(0.0, balance - prev_hwm + min(0.0, eow_unrealized)),
+                    'payout': max(0.0, balance - prev_hwm + min(0.0, eow_unrealized)) * week_penalty,
+                    'weekly_penalty': week_penalty,
                     'orders': [o.to_python_dict() for o in week_orders],
                 })
 
